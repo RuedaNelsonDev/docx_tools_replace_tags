@@ -20,6 +20,7 @@ import java.util.zip.*;
  * - Soporta ||BR|| para saltos de línea
  * - Ignora cuadros de texto
  * - Maneja tags fragmentados (divididos entre múltiples w:r)
+ * - PRESERVA saltos de línea existentes
  */
 public class LoopCommand {
 
@@ -157,42 +158,72 @@ public class LoopCommand {
 
             if (runInfos.isEmpty()) continue;
 
-            // Concatenar texto completo del párrafo
-            StringBuilder fullText = new StringBuilder();
-            for (RunInfo info : runInfos) {
-                fullText.append(info.text);
-            }
-
-            String originalFullText = fullText.toString();
-            String modifiedFullText = originalFullText;
-            boolean huboReemplazos = false;
-
-            // Reemplazar tags (solo primera ocurrencia de cada tag por párrafo)
+            // PRIMERO: Intentar reemplazar en elementos individuales (sin concatenar)
+            // Esto preserva los saltos de línea existentes
+            boolean reemplazoIndividual = false;
             for (Map.Entry<String, String> entrada : reemplazos.entrySet()) {
                 String tag = entrada.getKey();
                 String valor = entrada.getValue();
 
-                int idx = modifiedFullText.indexOf(tag);
-                if (idx >= 0) {
-                    // Reemplazar solo la primera ocurrencia
-                    modifiedFullText = modifiedFullText.substring(0, idx) + valor +
-                            modifiedFullText.substring(idx + tag.length());
-                    System.out.println("  Reemplazado en párrafo " + i + ": " + tag);
-                    huboReemplazos = true;
-                    totalReemplazos++;
+                for (RunInfo info : runInfos) {
+                    if (info.text.contains(tag)) {
+                        String nuevoTexto = info.text.replace(tag, valor);
+                        System.out.println("  Reemplazado en párrafo " + i + ": " + tag);
+
+                        if (nuevoTexto.contains("||BR||")) {
+                            DocxUtils.insertarTextoConSaltos(document, info.element, nuevoTexto);
+                        } else {
+                            info.element.setTextContent(nuevoTexto);
+                        }
+
+                        reemplazoIndividual = true;
+                        totalReemplazos++;
+                        break; // Solo primera ocurrencia por párrafo
+                    }
                 }
+
+                if (reemplazoIndividual) break;
             }
 
-            if (huboReemplazos && !modifiedFullText.equals(originalFullText)) {
-                if (modifiedFullText.contains("||BR||")) {
-                    DocxUtils.insertarTextoConSaltos(document, runInfos.get(0).element, modifiedFullText);
-                } else {
-                    runInfos.get(0).element.setTextContent(modifiedFullText);
+            // Si no se encontró en elementos individuales, buscar tags fragmentados
+            if (!reemplazoIndividual) {
+                // Concatenar texto completo del párrafo
+                StringBuilder fullText = new StringBuilder();
+                for (RunInfo info : runInfos) {
+                    fullText.append(info.text);
                 }
 
-                // Limpiar los demás elementos del párrafo
-                for (int idx = 1; idx < runInfos.size(); idx++) {
-                    runInfos.get(idx).element.setTextContent("");
+                String originalFullText = fullText.toString();
+                String modifiedFullText = originalFullText;
+                boolean huboReemplazos = false;
+
+                // Reemplazar tags fragmentados
+                for (Map.Entry<String, String> entrada : reemplazos.entrySet()) {
+                    String tag = entrada.getKey();
+                    String valor = entrada.getValue();
+
+                    int idx = modifiedFullText.indexOf(tag);
+                    if (idx >= 0) {
+                        modifiedFullText = modifiedFullText.substring(0, idx) + valor +
+                                modifiedFullText.substring(idx + tag.length());
+                        System.out.println("  Reemplazado (fragmentado) en párrafo " + i + ": " + tag);
+                        huboReemplazos = true;
+                        totalReemplazos++;
+                        break; // Solo primera ocurrencia
+                    }
+                }
+
+                if (huboReemplazos && !modifiedFullText.equals(originalFullText)) {
+                    if (modifiedFullText.contains("||BR||")) {
+                        DocxUtils.insertarTextoConSaltos(document, runInfos.get(0).element, modifiedFullText);
+                    } else {
+                        runInfos.get(0).element.setTextContent(modifiedFullText);
+                    }
+
+                    // Limpiar los demás elementos del párrafo
+                    for (int idx = 1; idx < runInfos.size(); idx++) {
+                        runInfos.get(idx).element.setTextContent("");
+                    }
                 }
             }
         }
